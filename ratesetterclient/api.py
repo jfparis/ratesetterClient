@@ -103,6 +103,14 @@ class RateSetterClient(object):
         """
         self._sign_out_url = tree.xpath('.//div[@id="membersInfo"]//a[contains(text(),"Sign Out")]')[0].get('href')
 
+        # invert the market list dictionary
+        inv_markets = {v:k for k, v in self.markets.items()}
+
+        self._lending_url = {}
+        lending_menu = tree.xpath('.//a[contains(text(),"Lend Money")]/parent::li//following::li[position()<5]/a')
+        for each in lending_menu:
+            self._lending_url[inv_markets[each.text]] = each.get("href")
+
     def connect(self):
         """Connect the client to RateSetter
         """
@@ -183,7 +191,7 @@ class RateSetterClient(object):
         for key, label in self.markets.items():
             td = tree.xpath('.//h2/span[contains(text(),"Your Portfolio")]/following::td[contains(text(),"{}")]/parent::tr/descendant::td[contains(@style,"align")]'.format(label))
             row = {}
-            row["lent"] = convert_to_decimal(td[0].text + td[1].text)
+            row["amount"] = convert_to_decimal(td[0].text + td[1].text)
             if not "-" in td[2].text:
                 row["average_rate"] = convert_to_decimal(td[2].text.rstrip("%"))/100
             else:
