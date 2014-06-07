@@ -68,6 +68,11 @@ class RateSetterClient(object):
         self._session.headers = {'User-agent': user_agent}
         self._session.verify = True
 
+        self.markets = {"monthly": "Monthly Access",
+                        "1 year bond": "1 Year Bond",
+                        "3 year income": "3 Year Income",
+                        "5 year income": "5 Year Income"}
+
     def _get_http_helper(self):
         """Returns a helper function that allows lxml form processor to post using requests"""
 
@@ -166,18 +171,34 @@ class RateSetterClient(object):
 
         return response
 
+    def get_portfolio_summary(self):
+        if not self._connected:
+            self.connect()
+
+        response = {}
+
+        page = self._session.get(self._dashboard_url)
+        tree = html.fromstring(page.text, base_url=page.url)
+
+        for key, label in self.markets.items():
+            td = tree.xpath('.//h2/span[contains(text(),"Your Portfolio")]/following::td[contains(text(),"{}")]/parent::tr/descendant::td[contains(@style,"align")]'.format(label))
+            row = {}
+            row["lent"] = convert_to_decimal(td[0].text + td[1].text)
+            if not "-" in td[2].text:
+                row["average_rate"] = convert_to_decimal(td[2].text.rstrip("%"))/100
+            else:
+                row["average_rate"] = Decimal(0)
+            row["on_market"] = convert_to_decimal(td[3].text + td[4].text)
+            response[key] = row
+
+        return response
 
     def get_market_rates(self):
         response = {}
         page = self._session.get(market_view_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
-        data_keys = {"monthly": "Monthly Access",
-                     "1 year bond": "1 Year Bond",
-                     "3 year income": "3 Year Income",
-                     "5 year income":"5 Year Income"}
-
-        for key, html_label in data_keys.items():
+        for key, html_label in self.markets.items():
 
             span = tree.xpath('.//h3[contains(text(),"{}")]/following-sibling::div[@class="currentRate"]/span[@class="rateValue"]'.format(html_label))
             response[key] = convert_to_decimal(span[0].text)/100
