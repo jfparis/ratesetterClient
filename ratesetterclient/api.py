@@ -28,6 +28,18 @@ provision_fund_url = "http://www.ratesetter.com/lending/provision_fund.aspx"
 market_view_url = "http://www.ratesetter.com/lending/market_view.aspx"
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:29.0) Gecko/20100101 Firefox/29.0"
 
+def convert_to_decimal(num):
+    """ convert strings to decimal.Decimal() objects, taking into account ratesetter formatting
+    conventions
+
+    :param num: a number as per formated by rate setter website
+    :return: decimal.Decimal() representation of num
+    """
+    val = sub(r'[^\d\(\)\-.]', '', num.strip('£ \n\r'))
+    if val[0] == '(' and val[-1] == ')':
+        val = "-" + val.rstrip(')').lstrip('(')
+    return Decimal(val)
+
 
 class RateSetterException(Exception):
     pass
@@ -129,26 +141,46 @@ class RateSetterClient(object):
 
         self._connected = False
 
+    def get_account_summary(self):
+        if not self._connected:
+            self.connect()
+
+        response = {}
+
+        page = self._session.get(self._dashboard_url)
+        tree = html.fromstring(page.text, base_url=page.url)
+
+        data_keys = {"deposited": "Deposited",
+                     "balance": "Balance (Available to lend)",
+                     "promotions": "Promotions",
+                     "on_loan": "Money On Loan",
+                     "interest_earned": "Interest earned",
+                     "on_market": "Money On Market",
+                     "fees": "Fees paid to RateSetter",
+                     "withdrawals": "Withdrawals",
+                     "total": "TOTAL"}
+
+        for key, label in data_keys.items():
+            td = tree.xpath('.//h2/span[contains(text(),"Your Balance Sheet")]/following::td[contains(text(),"{}")]/following-sibling::td[contains(text(),"£")]'.format(label))
+            response[key] = convert_to_decimal(td[0].text)
+
+        return response
+
+
     def get_market_rates(self):
         response = {}
         page = self._session.get(market_view_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
-        span = tree.xpath('.//h3[contains(text(),"Monthly Access")]/following-sibling::div[@class="currentRate"]/span[@class="rateValue"]')
-        val = sub(r'[^\d\-.]', '', span[0].text.strip('£ \n\r'))
-        response["monthly"] = Decimal(val)/100
+        data_keys = {"monthly": "Monthly Access",
+                     "1 year bond": "1 Year Bond",
+                     "3 year income": "3 Year Income",
+                     "5 year income":"5 Year Income"}
 
-        span = tree.xpath('.//h3[contains(text(),"1 Year Bond")]/following-sibling::div[@class="currentRate"]/span[@class="rateValue"]')
-        val = sub(r'[^\d\-.]', '', span[0].text.strip('£ \n\r'))
-        response["1 year bond"] = Decimal(val)/100
+        for key, html_label in data_keys.items():
 
-        span = tree.xpath('.//h3[contains(text(),"3 Year Income")]/following-sibling::div[@class="currentRate"]/span[@class="rateValue"]')
-        val = sub(r'[^\d\-.]', '', span[0].text.strip('£ \n\r'))
-        response["3 year income"] = Decimal(val)/100
-
-        span = tree.xpath('.//h3[contains(text(),"5 Year Income")]/following-sibling::div[@class="currentRate"]/span[@class="rateValue"]')
-        val = sub(r'[^\d\-.]', '', span[0].text.strip('£ \n\r'))
-        response["5 year income"] = Decimal(val)/100
+            span = tree.xpath('.//h3[contains(text(),"{}")]/following-sibling::div[@class="currentRate"]/span[@class="rateValue"]'.format(html_label))
+            response[key] = convert_to_decimal(span[0].text)/100
 
         return response
 
@@ -158,11 +190,9 @@ class RateSetterClient(object):
         tree = html.fromstring(page.text, base_url=page.url)
 
         span = tree.xpath('.//p[contains(text(),"How much is in the Provision Fund")]/span')
-        val = sub(r'[^\d\-.]', '', span[0].text.strip('£ \n\r'))
-        response["provision_fund"] = Decimal(val)
+        response["provision_fund"] = convert_to_decimal(span[0].text)
 
         span = tree.xpath('.//div[contains(text(),"Coverage Ratio")]/following-sibling::div/span[@class="rateValue"]')
-        val = sub(r'[^\d\-.]', '', span[0].text.strip('£ \n\r'))
-        response["coverage"] = Decimal(val)/100
+        response["coverage"] = convert_to_decimal(span[0].text)/100
 
         return response
