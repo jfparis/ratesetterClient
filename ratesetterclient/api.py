@@ -22,6 +22,7 @@ from lxml import html
 from decimal import Decimal
 from re import sub
 import time
+from collections import OrderedDict
 
 home_page_url = "https://www.ratesetter.com/"
 provision_fund_url = "http://www.ratesetter.com/lending/provision_fund.aspx"
@@ -35,11 +36,21 @@ def convert_to_decimal(num):
     :param num: a number as per formated by rate setter website
     :return: decimal.Decimal() representation of num
     """
-    val = sub(r'[^\d\(\)\-.]', '', num.strip('£ \n\r'))
+    val = sub(r'[^\d\(\)\-k.]', '', num.strip('£ \n\r'))
+    multiplicator = 1
     if val[0] == '(' and val[-1] == ')':
         val = "-" + val.rstrip(')').lstrip('(')
-    return Decimal(val)
+    if val[-1] == 'k':
+        multiplicator = 1000
+        val = val.rstrip('k')
+    return Decimal(val) * multiplicator
 
+def multiple_iterator(iterator, nb):
+    while True:
+        res = []
+        for each in range(nb):
+            res.append(next(iterator))
+        yield res
 
 class RateSetterException(Exception):
     pass
@@ -155,12 +166,10 @@ class RateSetterClient(object):
         self._connected = False
 
     def get_account_summary(self):
-        if not self._connected:
-            self.connect()
-
         response = {}
 
         page = self._session.get(self._dashboard_url)
+        self._sleep_if_needed()
         tree = html.fromstring(page.text, base_url=page.url)
 
         data_keys = {"deposited": "Deposited",
@@ -180,12 +189,10 @@ class RateSetterClient(object):
         return response
 
     def get_portfolio_summary(self):
-        if not self._connected:
-            self.connect()
-
         response = {}
 
         page = self._session.get(self._dashboard_url)
+        self._sleep_if_needed()
         tree = html.fromstring(page.text, base_url=page.url)
 
         for key, label in self.markets.items():
@@ -200,6 +207,37 @@ class RateSetterClient(object):
             response[key] = row
 
         return response
+
+    def get_market(self, market):
+        """Get the money on offer on a given market
+
+        :param market:
+        :return:
+        """
+        url = self._lending_url[market]
+        url = url.replace("market_view", "market_full").replace("?pid=", "?id=")
+
+        print(url)
+
+        page = self._session.get(url)
+        self._sleep_if_needed()
+
+        tree = html.fromstring(page.text, base_url=page.url)
+        lending_menu = tree.xpath('.//table[@class="rsTable"]/tr/td')
+
+        iterator = multiple_iterator(iter(lending_menu), 4)
+        _ = next(iterator)
+        market = OrderedDict()
+
+        for rate, amount, nb_offer, cum_amount in iterator:
+            item = {'rate': convert_to_decimal(rate.text.strip()) / 100,
+                    'amount': convert_to_decimal(amount.text.strip()),
+                    'nb_offer': convert_to_decimal(nb_offer.text.strip()),
+                    'cum_amount': convert_to_decimal(cum_amount.text.strip())}
+
+            market[item['rate']] = item
+
+        return market
 
     def get_market_rates(self):
         response = {}
