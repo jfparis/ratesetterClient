@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import, print_function, division
 import random
 import requests
 from lxml import html
@@ -23,6 +23,12 @@ from decimal import Decimal
 from re import sub
 import time
 from collections import OrderedDict
+import logging
+
+import http.client
+http.client.HTTPConnection.debuglevel = 1
+
+log = logging.getLogger(__name__)
 
 home_page_url = "https://www.ratesetter.com/"
 provision_fund_url = "http://www.ratesetter.com/lending/provision_fund.aspx"
@@ -238,6 +244,37 @@ class RateSetterClient(object):
             market[item['rate']] = item
 
         return market
+
+    def place_bid(self, amount, rate, market):
+        """
+
+        :param amount:
+        :param rate:
+        :param market:
+        :return:
+        """
+
+        page = self._session.get(self._lending_url[market])
+        self._sleep_if_needed()
+
+        tree = html.fromstring(page.text, base_url=page.url)
+        form = tree.forms[0]
+
+        # asp.net form require the button that was clicked ..
+        form.fields["__EVENTTARGET"] = "ctl00$cphContentArea$btnSetRate"
+        form.fields["ctl00$cphContentArea$tbAmount"] = str(amount)
+        form.fields["ctl00$cphContentArea$tbRate"] = str(rate*100)
+
+        page = html.submit_form(form, open_http=self._get_http_helper())
+        self._sleep_if_needed()
+
+        tree = html.fromstring(page.text, base_url=page.url)
+        form = tree.forms[0]
+
+        # asp.net form require the button that was clicked ..
+        form.fields["__EVENTTARGET"] = "ctl00$cphContentArea$btnOrder"
+
+        page = html.submit_form(form, open_http=self._get_http_helper())
 
     def get_market_rates(self):
         response = {}
