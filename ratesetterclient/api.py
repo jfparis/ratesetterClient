@@ -15,31 +15,36 @@
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import absolute_import, print_function, division
+from __future__ import unicode_literals, absolute_import, print_function, division
 import random
 import requests
 from lxml import html
 from decimal import Decimal
 from re import sub
 import time
-from collections import OrderedDict
-import logging
+from collections import OrderedDict, namedtuple
 
-import http.client
-http.client.HTTPConnection.debuglevel = 1
+markets_list = (("monthly", "Monthly Access"),
+                ("bond_1year", "1 Year Bond"),
+                ("income_3year", "3 Year Income"),
+                ("income_5year", "5 Year Income"))
 
-log = logging.getLogger(__name__)
+Markets = namedtuple('Markets', ','.join([key for key, _ in markets_list]))
+MarketOffer = namedtuple('MarketOffer', 'rate, amount, nb_offers, cum_amount')
+PortfolioRow = namedtuple('PortfolioRow', 'amount, average_rate, on_market')
+ProvisionFund = namedtuple('ProvisionFund', 'amount, coverage')
 
 home_page_url = "https://www.ratesetter.com/"
 provision_fund_url = "http://www.ratesetter.com/lending/provision_fund.aspx"
 market_view_url = "http://www.ratesetter.com/lending/market_view.aspx"
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:29.0) Gecko/20100101 Firefox/29.0"
 
+
 def convert_to_decimal(num):
     """ convert strings to decimal.Decimal() objects, taking into account ratesetter formatting
     conventions
 
-    :param num: a number as per formated by rate setter website
+    :param num: a number as per formatted by rate setter website
     :return: decimal.Decimal() representation of num
     """
     val = sub(r'[^\d\(\)\-k.]', '', num.strip('£ \n\r'))
@@ -85,10 +90,7 @@ class RateSetterClient(object):
         self._session.headers = {'User-agent': user_agent}
         self._session.verify = True
 
-        self.markets = {"monthly": "Monthly Access",
-                        "1 year bond": "1 Year Bond",
-                        "3 year income": "3 Year Income",
-                        "5 year income": "5 Year Income"}
+        self.markets = Markets(*[key for key, _ in markets_list])
 
     def _get_http_helper(self):
         """Returns a helper function that allows lxml form processor to post using requests"""
@@ -120,8 +122,8 @@ class RateSetterClient(object):
         """
         self._sign_out_url = tree.xpath('.//div[@id="membersInfo"]//a[contains(text(),"Sign Out")]')[0].get('href')
 
-        # invert the market list dictionary
-        inv_markets = {v:k for k, v in self.markets.items()}
+        # invert the market list
+        inv_markets = {v:k for k, v in markets_list}
 
         self._lending_url = {}
         lending_menu = tree.xpath('.//a[contains(text(),"Lend Money")]/parent::li//following::li[position()<5]/a')
@@ -172,47 +174,48 @@ class RateSetterClient(object):
         self._connected = False
 
     def get_account_summary(self):
-        response = {}
-
         page = self._session.get(self._dashboard_url)
         self._sleep_if_needed()
         tree = html.fromstring(page.text, base_url=page.url)
 
-        data_keys = {"deposited": "Deposited",
-                     "balance": "Balance (Available to lend)",
-                     "promotions": "Promotions",
-                     "on_loan": "Money On Loan",
-                     "interest_earned": "Interest earned",
-                     "on_market": "Money On Market",
-                     "fees": "Fees paid to RateSetter",
-                     "withdrawals": "Withdrawals",
-                     "total": "TOTAL"}
+        data_keys = (("deposited", "Deposited"),
+                     ("balance", "Balance (Available to lend)"),
+                     ("promotions", "Promotions"),
+                     ("on_loan", "Money On Loan"),
+                     ("interest_earned", "Interest earned"),
+                     ("on_market", "Money On Market"),
+                     ("fees", "Fees paid to RateSetter"),
+                     ("withdrawals", "Withdrawals"),
+                     ("total", "TOTAL"))
 
-        for key, label in data_keys.items():
+        Account = namedtuple('Account', ",".join([key for key, _ in data_keys]))
+
+        response = []
+        for key, label in data_keys:
             td = tree.xpath('.//h2/span[contains(text(),"Your Balance Sheet")]/following::td[contains(text(),"{}")]/following-sibling::td[contains(text(),"£")]'.format(label))
-            response[key] = convert_to_decimal(td[0].text)
+            response.append(convert_to_decimal(td[0].text))
 
-        return response
+        return Account(*response)
 
     def get_portfolio_summary(self):
-        response = {}
+        portfolio_items = []
 
         page = self._session.get(self._dashboard_url)
         self._sleep_if_needed()
         tree = html.fromstring(page.text, base_url=page.url)
 
-        for key, label in self.markets.items():
+        for key, label in markets_list:
             td = tree.xpath('.//h2/span[contains(text(),"Your Portfolio")]/following::td[contains(text(),"{}")]/parent::tr/descendant::td[contains(@style,"align")]'.format(label))
-            row = {}
-            row["amount"] = convert_to_decimal(td[0].text + td[1].text)
-            if not "-" in td[2].text:
-                row["average_rate"] = convert_to_decimal(td[2].text.rstrip("%"))/100
-            else:
-                row["average_rate"] = Decimal(0)
-            row["on_market"] = convert_to_decimal(td[3].text + td[4].text)
-            response[key] = row
 
-        return response
+            amount = convert_to_decimal(td[0].text + td[1].text)
+            if not "-" in td[2].text:
+                average_rate = convert_to_decimal(td[2].text.rstrip("%"))/100
+            else:
+                average_rate = Decimal(0)
+            on_market = convert_to_decimal(td[3].text + td[4].text)
+            portfolio_items.append(PortfolioRow(amount=amount, average_rate=average_rate, on_market=on_market))
+
+        return Markets(*portfolio_items)
 
     def get_market(self, market):
         """Get the money on offer on a given market
@@ -222,8 +225,6 @@ class RateSetterClient(object):
         """
         url = self._lending_url[market]
         url = url.replace("market_view", "market_full").replace("?pid=", "?id=")
-
-        print(url)
 
         page = self._session.get(url)
         self._sleep_if_needed()
@@ -236,21 +237,21 @@ class RateSetterClient(object):
         market = OrderedDict()
 
         for rate, amount, nb_offer, cum_amount in iterator:
-            item = {'rate': convert_to_decimal(rate.text.strip()) / 100,
-                    'amount': convert_to_decimal(amount.text.strip()),
-                    'nb_offer': convert_to_decimal(nb_offer.text.strip()),
-                    'cum_amount': convert_to_decimal(cum_amount.text.strip())}
+            rate = convert_to_decimal(rate.text.strip()) / 100
+            amount = convert_to_decimal(amount.text.strip())
+            nb_offers = convert_to_decimal(nb_offer.text.strip())
+            cum_amount = convert_to_decimal(cum_amount.text.strip())
 
-            market[item['rate']] = item
+            market[rate] = MarketOffer(rate=rate, amount=amount, nb_offers=nb_offers, cum_amount=cum_amount)
 
         return market
 
-    def place_bid(self, amount, rate, market):
+    def place_bid(self, market, amount, rate):
         """
 
+        :param market:
         :param amount:
         :param rate:
-        :param market:
         :return:
         """
 
@@ -277,26 +278,25 @@ class RateSetterClient(object):
         page = html.submit_form(form, open_http=self._get_http_helper())
 
     def get_market_rates(self):
-        response = {}
+        rates = []
         page = self._session.get(market_view_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
-        for key, html_label in self.markets.items():
+        for key, html_label in markets_list:
 
             span = tree.xpath('.//h3[contains(text(),"{}")]/following-sibling::div[@class="currentRate"]/span[@class="rateValue"]'.format(html_label))
-            response[key] = convert_to_decimal(span[0].text)/100
+            rates.append(convert_to_decimal(span[0].text)/100)
 
-        return response
+        return Markets(*rates)
 
     def get_provision_fund(self):
-        response = {}
         page = self._session.get(provision_fund_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
         span = tree.xpath('.//p[contains(text(),"How much is in the Provision Fund")]/span')
-        response["provision_fund"] = convert_to_decimal(span[0].text)
+        amount = convert_to_decimal(span[0].text)
 
         span = tree.xpath('.//div[contains(text(),"Coverage Ratio")]/following-sibling::div/span[@class="rateValue"]')
-        response["coverage"] = convert_to_decimal(span[0].text)/100
+        coverage = convert_to_decimal(span[0].text)/100
 
-        return response
+        return ProvisionFund(amount=amount, coverage=coverage)
