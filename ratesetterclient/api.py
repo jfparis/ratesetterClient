@@ -29,7 +29,20 @@ markets_list = (("monthly", "Monthly Access"),
                 ("income_3year", "3 Year Income"),
                 ("income_5year", "5 Year Income"))
 
+account_keys = (("deposited", "Deposited"),
+                ("balance", "Balance (Available to lend)"),
+                ("promotions", "Promotions"),
+                ("on_loan", "Money On Loan"),
+                ("interest_earned", "Interest earned"),
+                ("on_market", "Money On Market"),
+                ("fees", "Fees paid to RateSetter"),
+                ("withdrawals", "Withdrawals"),
+                ("total", "TOTAL"))
+
+
 Markets = namedtuple('Markets', ','.join([key for key, _ in markets_list]))
+Account = namedtuple('Account', ",".join([key for key, _ in account_keys]))
+
 MarketOffer = namedtuple('MarketOffer', 'rate, amount, nb_offers, cum_amount')
 PortfolioRow = namedtuple('PortfolioRow', 'amount, average_rate, on_market')
 ProvisionFund = namedtuple('ProvisionFund', 'amount, coverage')
@@ -48,13 +61,14 @@ def convert_to_decimal(num):
     :return: decimal.Decimal() representation of num
     """
     val = sub(r'[^\d\(\)\-k.]', '', num.strip('£ \n\r'))
-    multiplicator = 1
+    multiplier = 1
     if val[0] == '(' and val[-1] == ')':
         val = "-" + val.rstrip(')').lstrip('(')
     if val[-1] == 'k':
-        multiplicator = 1000
+        multiplier = 1000
         val = val.rstrip('k')
-    return Decimal(val) * multiplicator
+    return Decimal(val) * multiplier
+
 
 def multiple_iterator(iterator, nb):
     while True:
@@ -63,11 +77,15 @@ def multiple_iterator(iterator, nb):
             res.append(next(iterator))
         yield res
 
+
 class RateSetterException(Exception):
     pass
 
 
 class RateSetterClient(object):
+    """ A HTML scrapping client for the ratesetter website
+
+    """
 
     def __init__(self, email, password, natural=True):
         """ Initialise the Rate Setter client
@@ -91,6 +109,13 @@ class RateSetterClient(object):
         self._session.verify = True
 
         self.markets = Markets(*[key for key, _ in markets_list])
+        """Named tuple that holding the name of the different markets
+
+        * monthly: Monthly Access
+        * bond_1year: 1 Year Bond
+        * income_3year: 3 Year Income
+        * income_5year: 5 Year Income
+        """
 
     def _get_http_helper(self):
         """Returns a helper function that allows lxml form processor to post using requests"""
@@ -119,11 +144,13 @@ class RateSetterClient(object):
 
         This method shall be called once after connection in order to
         avoid having to seek for the URL at a later stage
+
+        :param tree: lxml tree of the account home page
         """
         self._sign_out_url = tree.xpath('.//div[@id="membersInfo"]//a[contains(text(),"Sign Out")]')[0].get('href')
 
         # invert the market list
-        inv_markets = {v:k for k, v in markets_list}
+        inv_markets = {v: k for k, v in markets_list}
 
         self._lending_url = {}
         lending_menu = tree.xpath('.//a[contains(text(),"Lend Money")]/parent::li//following::li[position()<5]/a')
@@ -164,7 +191,6 @@ class RateSetterClient(object):
 
     def disconnect(self):
         """ Disconnect the client from RateSetter
-
         """
         page = self._session.get(self._sign_out_url)
 
@@ -174,30 +200,47 @@ class RateSetterClient(object):
         self._connected = False
 
     def get_account_summary(self):
+        """Get a summary of the account
+
+        :return: a namedtuple containing the following field
+
+        * deposited: total amount deposited since the opening of the account
+        * balance: Balance (Available to lend)
+        * promotions: amount received for promotions
+        * on_loan: Money On Loan
+        * interest_earned: Interest earned
+        * on_market: Money offered on market
+        * fees: fees paid to RateSetter
+        * withdrawals: total Withdrawals since the opening of the account
+        * total: Grand total
+
+        """
         page = self._session.get(self._dashboard_url)
         self._sleep_if_needed()
         tree = html.fromstring(page.text, base_url=page.url)
 
-        data_keys = (("deposited", "Deposited"),
-                     ("balance", "Balance (Available to lend)"),
-                     ("promotions", "Promotions"),
-                     ("on_loan", "Money On Loan"),
-                     ("interest_earned", "Interest earned"),
-                     ("on_market", "Money On Market"),
-                     ("fees", "Fees paid to RateSetter"),
-                     ("withdrawals", "Withdrawals"),
-                     ("total", "TOTAL"))
-
-        Account = namedtuple('Account', ",".join([key for key, _ in data_keys]))
-
         response = []
-        for key, label in data_keys:
+        for key, label in account_keys:
             td = tree.xpath('.//h2/span[contains(text(),"Your Balance Sheet")]/following::td[contains(text(),"{}")]/following-sibling::td[contains(text(),"£")]'.format(label))
             response.append(convert_to_decimal(td[0].text))
 
         return Account(*response)
 
     def get_portfolio_summary(self):
+        """Get a summary of the connected user portfolio
+
+        :return: a named tuple with the four fields
+
+        * monthly: user portfolio on the Monthly Access market
+        * bond_1year: user portfolio on the 1 Year Bond market
+        * income_3year: user portfolio on the 3 Year Income market
+        * income_5year: user portfolio on the 5 Year Income market
+
+        A user portfolio is in turn a named tuple with the following fields
+        * amount: Money on loan in that particular market
+        * average_rate: Average lending rate
+        * on_market: Money currently on offer on the market
+        """
         portfolio_items = []
 
         page = self._session.get(self._dashboard_url)
@@ -220,8 +263,14 @@ class RateSetterClient(object):
     def get_market(self, market):
         """Get the money on offer on a given market
 
-        :param market:
-        :return:
+        :param market: one of the name held in self.markets
+        :return: a tuple, ordered from the lowest rate to the highest, containing containing \
+        named tuples with the following fields
+
+        * rate: the offered rate
+        * amount: the total amount on offer at that rate
+        * nb_offers: the number of offers
+        * cum_amount: cumulative amount on offer at that rate and below
         """
         url = self._lending_url[market]
         url = url.replace("market_view", "market_full").replace("?pid=", "?id=")
@@ -234,7 +283,7 @@ class RateSetterClient(object):
 
         iterator = multiple_iterator(iter(lending_menu), 4)
         _ = next(iterator)
-        market = OrderedDict()
+        market = []
 
         for rate, amount, nb_offer, cum_amount in iterator:
             rate = convert_to_decimal(rate.text.strip()) / 100
@@ -242,17 +291,16 @@ class RateSetterClient(object):
             nb_offers = convert_to_decimal(nb_offer.text.strip())
             cum_amount = convert_to_decimal(cum_amount.text.strip())
 
-            market[rate] = MarketOffer(rate=rate, amount=amount, nb_offers=nb_offers, cum_amount=cum_amount)
+            market.append(MarketOffer(rate=rate, amount=amount, nb_offers=nb_offers, cum_amount=cum_amount))
 
-        return market
+        return tuple(reversed(market))
 
     def place_bid(self, market, amount, rate):
-        """
+        """ Place a bid to lend money on the market
 
-        :param market:
-        :param amount:
-        :param rate:
-        :return:
+        :param market: one of the name held in self.markets
+        :param amount: Amount to lend in GBP
+        :param rate: Offered rate
         """
 
         page = self._session.get(self._lending_url[market])
@@ -278,6 +326,15 @@ class RateSetterClient(object):
         page = html.submit_form(form, open_http=self._get_http_helper())
 
     def get_market_rates(self):
+        """Get the rates of the latest matches on the different markets
+
+        :return: a named tuple with the four fields
+
+        * monthly: latest match on the Monthly Access market
+        * bond_1year: latest match on the 1 Year Bond market
+        * income_3year: latest match on the 3 Year Income market
+        * income_5year: latest match on the 5 Year Income market
+        """
         rates = []
         page = self._session.get(market_view_url)
         tree = html.fromstring(page.text, base_url=page.url)
@@ -290,6 +347,13 @@ class RateSetterClient(object):
         return Markets(*rates)
 
     def get_provision_fund(self):
+        """Get the status of the provision fund
+
+        :return: A named tuple with two fields:
+
+        * amount: the amount in the fund in GBP
+        * coverage: the coverage ratio of the fund
+        """
         page = self._session.get(provision_fund_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
