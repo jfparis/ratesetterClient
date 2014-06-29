@@ -16,6 +16,6 @@
 # License along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
-from ratesetterclient.api import RateSetterClient
+from .api import *
 
 __version__ = "0.1.0"

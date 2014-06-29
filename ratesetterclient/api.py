@@ -23,6 +23,7 @@ from decimal import Decimal
 from re import sub
 import time
 from collections import OrderedDict, namedtuple
+from .log import logger
 
 markets_list = (("monthly", "Monthly Access"),
                 ("bond_1year", "1 Year Bond"),
@@ -39,10 +40,8 @@ account_keys = (("deposited", "Deposited"),
                 ("withdrawals", "Withdrawals"),
                 ("total", "TOTAL"))
 
-
 Markets = namedtuple('Markets', ','.join([key for key, _ in markets_list]))
 Account = namedtuple('Account', ",".join([key for key, _ in account_keys]))
-
 MarketOffer = namedtuple('MarketOffer', 'rate, amount, nb_offers, cum_amount')
 PortfolioRow = namedtuple('PortfolioRow', 'amount, average_rate, on_market')
 ProvisionFund = namedtuple('ProvisionFund', 'amount, coverage')
