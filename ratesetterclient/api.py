@@ -116,15 +116,20 @@ class RateSetterClient(object):
         * income_5year: 5 Year Income
         """
 
+        logger.debug("Created client for ratesetter")
+
     def _get_http_helper(self):
         """Returns a helper function that allows lxml form processor to post using requests"""
 
         def helper(method, url, value):
             if not url:
+                logger.error("Cannot submit request. No URL provided")
                 raise ValueError("cannot submit, no URL provided")
             if method == 'GET':
+                logger.debug("GET request URL: %s, Value: %s", url, value)
                 return self._session.get(url, value)
             else:
+                logger.debug("POST request URL: %s, Value: %s", url, value)
                 return self._session.post(url, value)
 
         return helper
@@ -159,7 +164,8 @@ class RateSetterClient(object):
     def connect(self):
         """Connect the client to RateSetter
         """
-
+        logger.debug("Authenticating ratesetter client")
+        logger.debug("GET request URL: %s", home_page_url)
         page = self._session.get(home_page_url)
         tree = html.fromstring(page.text, base_url=page.url)
         self._sleep_if_needed()
@@ -175,6 +181,7 @@ class RateSetterClient(object):
         form.fields["ctl00$cphContentArea$cphForm$txtEmail"] = self._email
         form.fields["ctl00$cphContentArea$cphForm$txtPassword"] = self._password
 
+        logger.debug("Submit form")
         page = html.submit_form(form, open_http=self._get_http_helper())
 
         if "login.aspx" in page.url:
@@ -191,6 +198,7 @@ class RateSetterClient(object):
     def disconnect(self):
         """ Disconnect the client from RateSetter
         """
+        logger.debug("GET request URL: %s", self._sign_out_url)
         page = self._session.get(self._sign_out_url)
 
         if not "login.aspx" in page.url:
@@ -214,6 +222,7 @@ class RateSetterClient(object):
         * total: Grand total
 
         """
+        logger.debug("GET request URL: %s", self._dashboard_url)
         page = self._session.get(self._dashboard_url)
         self._sleep_if_needed()
         tree = html.fromstring(page.text, base_url=page.url)
@@ -242,6 +251,7 @@ class RateSetterClient(object):
         """
         portfolio_items = []
 
+        logger.debug("GET request URL: %s", self._dashboard_url)
         page = self._session.get(self._dashboard_url)
         self._sleep_if_needed()
         tree = html.fromstring(page.text, base_url=page.url)
@@ -274,6 +284,7 @@ class RateSetterClient(object):
         url = self._lending_url[market]
         url = url.replace("market_view", "market_full").replace("?pid=", "?id=")
 
+        logger.debug("GET request URL: %s", url)
         page = self._session.get(url)
         self._sleep_if_needed()
 
@@ -301,8 +312,9 @@ class RateSetterClient(object):
         :param amount: Amount to lend in GBP
         :param rate: Offered rate
         """
-
-        page = self._session.get(self._lending_url[market])
+        url = self._lending_url[market]
+        logger.debug("GET request URL: %s", url)
+        page = self._session.get(url)
         self._sleep_if_needed()
 
         tree = html.fromstring(page.text, base_url=page.url)
@@ -313,6 +325,7 @@ class RateSetterClient(object):
         form.fields["ctl00$cphContentArea$tbAmount"] = str(amount)
         form.fields["ctl00$cphContentArea$tbRate"] = str(rate*100)
 
+        logger.debug("Submit form")
         page = html.submit_form(form, open_http=self._get_http_helper())
         self._sleep_if_needed()
 
@@ -335,6 +348,7 @@ class RateSetterClient(object):
         * income_5year: latest match on the 5 Year Income market
         """
         rates = []
+        logger.debug("GET request URL: %s", market_view_url)
         page = self._session.get(market_view_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
@@ -353,6 +367,7 @@ class RateSetterClient(object):
         * amount: the amount in the fund in GBP
         * coverage: the coverage ratio of the fund
         """
+        logger.debug("GET request URL: %s", provision_fund_url)
         page = self._session.get(provision_fund_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
