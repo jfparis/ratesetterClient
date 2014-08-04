@@ -22,7 +22,7 @@ from lxml import html
 from decimal import Decimal
 from re import sub
 import time
-from collections import OrderedDict, namedtuple
+from collections import namedtuple
 from .log import logger
 
 markets_list = (("monthly", "Monthly Access"),
@@ -358,6 +358,22 @@ class RateSetterClient(object):
             rates.append(convert_to_decimal(span[0].text)/100)
 
         return Markets(*rates)
+
+    def list_bids(self, market):
+        """List bids in a given market
+
+        :param market: one of the name held in self.markets
+        :return: tuples of
+        """
+        pass
+
+    def cancel_bid(self, bid):
+        """Cancel a bid place previously
+
+        :param bid: a bid
+        :return:
+        """
+        pass
 
     def get_provision_fund(self):
         """Get the status of the provision fund
