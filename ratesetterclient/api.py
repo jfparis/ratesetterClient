@@ -26,7 +26,7 @@ from collections import namedtuple
 from .log import logger
 
 markets_list = (("monthly", "Monthly Access"),
-                ("bond_1year", "1 Year Bond"),
+                ("bond_1year", "1 Year"),
                 ("income_3year", "3 Year Income"),
                 ("income_5year", "5 Year Income"))
 
@@ -47,8 +47,8 @@ PortfolioRow = namedtuple('PortfolioRow', 'amount, average_rate, on_market')
 ProvisionFund = namedtuple('ProvisionFund', 'amount, coverage')
 
 home_page_url = "https://www.ratesetter.com/"
-provision_fund_url = "http://www.ratesetter.com/lending/provision_fund.aspx"
-market_view_url = "http://www.ratesetter.com/lending/market_view.aspx"
+provision_fund_url = "https://www.ratesetter.com/Lend/ProvisionFund"
+market_view_url = "https://members.ratesetter.com/your_lending/lend_money/choose_term.aspx"
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:29.0) Gecko/20100101 Firefox/29.0"
 
 
@@ -151,7 +151,7 @@ class RateSetterClient(object):
 
         :param tree: lxml tree of the account home page
         """
-        self._sign_out_url = tree.xpath('.//div[@id="membersInfo"]//a[contains(text(),"Sign Out")]')[0].get('href')
+        self._sign_out_url = tree.xpath('.//a[contains(text(),"Sign Out")]')[0].get('href')
 
         # invert the market list
         inv_markets = {v: k for k, v in markets_list}
@@ -170,7 +170,7 @@ class RateSetterClient(object):
         tree = html.fromstring(page.text, base_url=page.url)
         self._sleep_if_needed()
 
-        a = tree.xpath('.//div[@class="RegisterBalloon"]/div[@class="balloonButton"]/a[contains(text(),"Login")]')
+        a = tree.xpath('.//a[contains(text(),"Login")]')
 
         page = self._session.get(a[0].attrib['href'])
         tree = html.fromstring(page.text, base_url=page.url)
@@ -229,7 +229,7 @@ class RateSetterClient(object):
 
         response = []
         for key, label in account_keys:
-            td = tree.xpath('.//h2/span[contains(text(),"Your Balance Sheet")]/following::td[contains(text(),"{}")]/following-sibling::td[contains(text(),"£")]'.format(label))
+            td = tree.xpath('.//h3/span[contains(text(),"Your Balance Sheet")]/following::td[contains(text(),"{}")]/following-sibling::td[contains(text(),"£")]'.format(label))
             response.append(convert_to_decimal(td[0].text))
 
         return Account(*response)
@@ -257,7 +257,7 @@ class RateSetterClient(object):
         tree = html.fromstring(page.text, base_url=page.url)
 
         for key, label in markets_list:
-            td = tree.xpath('.//h2/span[contains(text(),"Your Portfolio")]/following::td[contains(text(),"{}")]/parent::tr/descendant::td[contains(@style,"align")]'.format(label))
+            td = tree.xpath('.//h3/span[contains(text(),"Your Portfolio")]/following::td[contains(text(),"{}")]/parent::tr/descendant::td[contains(@style,"align")]'.format(label))
 
             amount = convert_to_decimal(td[0].text + td[1].text)
             if not "-" in td[2].text:
@@ -282,14 +282,14 @@ class RateSetterClient(object):
         * cum_amount: cumulative amount on offer at that rate and below
         """
         url = self._lending_url[market]
-        url = url.replace("market_view", "market_full").replace("?pid=", "?id=")
+        url = url.replace("market_view", "market_full").replace("?pid=", "?ID=")
 
         logger.debug("GET request URL: %s", url)
         page = self._session.get(url)
         self._sleep_if_needed()
 
         tree = html.fromstring(page.text, base_url=page.url)
-        lending_menu = tree.xpath('.//table[@class="rsTable"]/tr/td')
+        lending_menu = tree.xpath('.//form/div[@class="rsTableContainer"]/table[@class="rsTable"]/tr/td')
 
         iterator = multiple_iterator(iter(lending_menu), 4)
         _ = next(iterator)
@@ -348,13 +348,13 @@ class RateSetterClient(object):
         * income_5year: latest match on the 5 Year Income market
         """
         rates = []
-        logger.debug("GET request URL: %s", market_view_url)
-        page = self._session.get(market_view_url)
+        logger.debug("GET request URL: %s", self._dashboard_url)
+        page = self._session.get(self._dashboard_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
         for key, html_label in markets_list:
 
-            span = tree.xpath('.//h3[contains(text(),"{}")]/following-sibling::div[@class="currentRate"]/span[@class="rateValue"]'.format(html_label))
+            span = tree.xpath('.//td[contains(text(),"{}")]/parent::tr/following-sibling::tr/td/h3/a'.format(html_label))
             rates.append(convert_to_decimal(span[0].text)/100)
 
         return Markets(*rates)
@@ -387,10 +387,10 @@ class RateSetterClient(object):
         page = self._session.get(provision_fund_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
-        span = tree.xpath('.//p[contains(text(),"How much is in the Provision Fund")]/span')
+        span = tree.xpath('.//h2[@class="hero-provision-amount"]')
         amount = convert_to_decimal(span[0].text)
 
-        span = tree.xpath('.//div[contains(text(),"Coverage Ratio")]/following-sibling::div/span[@class="rateValue"]')
+        span = tree.xpath('.//span[@class="hero-provision-value"]')
         coverage = convert_to_decimal(span[0].text)/100
 
         return ProvisionFund(amount=amount, coverage=coverage)
