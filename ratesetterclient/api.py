@@ -310,7 +310,7 @@ class RateSetterClient(object):
 
         :param market: one of the name held in self.markets
         :param amount: Amount to lend in GBP
-        :param rate: Offered rate
+        :param rate: Offered rate in percentage
         """
         url = self._lending_url[market]
         logger.debug("GET request URL: %s", url)
@@ -332,10 +332,29 @@ class RateSetterClient(object):
         tree = html.fromstring(page.text, base_url=page.url)
         form = tree.forms[0]
 
+        # Check if we have arrived on the confirmation page
+        confirm_tag = tree.xpath('.//div[@class="singleContainer"]/descendant::h3')
+        if len(confirm_tag) > 0 and confirm_tag[0].text.strip(' \n\r') == "Confirm your request":
+            logger.debug("Request was accepted. Need to confirm")
+        else:
+            error_tag = tree.xpath('.//div[@class="contextError"]')
+            message = error_tag[0].text.strip('- \n\r')
+            logger.debug("Request refused: %s", message)
+            raise RateSetterException(message)
+
         # asp.net form require the button that was clicked ..
         form.fields["__EVENTTARGET"] = "ctl00$cphContentArea$btnOrder"
 
         page = html.submit_form(form, open_http=self._get_http_helper())
+
+        # Check if the order has been confirmed
+        confirm_tag = tree.xpath('.//div[@class="singleContainer"]/descendant::h3')
+        if len(confirm_tag) > 0 and confirm_tag[0].text.strip(' \n\r') == "Your order has been placed":
+            logger.debug("Request was confirmed")
+        else:
+            logger.debug("Cannot confirm request")
+            raise RateSetterException('Cannot confirm bid')
+
 
     def get_market_rates(self):
         """Get the rates of the latest matches on the different markets
