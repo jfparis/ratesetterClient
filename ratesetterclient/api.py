@@ -18,12 +18,16 @@
 from __future__ import unicode_literals, absolute_import, print_function, division
 import random
 import requests
-from lxml import html
+from lxml import html, etree
 from decimal import Decimal
 from re import sub
 import time
 from collections import namedtuple
 from .log import logger
+
+
+__all__ = ['Markets', 'Account', 'RateSetterException', 'RateSetterClient']
+
 
 markets_list = (("monthly", "Monthly Access"),
                 ("bond_1year", "1 Year"),
@@ -45,6 +49,8 @@ Account = namedtuple('Account', ",".join([key for key, _ in account_keys]))
 MarketOffer = namedtuple('MarketOffer', 'rate, amount, nb_offers, cum_amount')
 PortfolioRow = namedtuple('PortfolioRow', 'amount, average_rate, on_market')
 ProvisionFund = namedtuple('ProvisionFund', 'amount, coverage')
+MarketOrder = namedtuple('MarketOrder', 'date, id, amount, rate, queue, cancel_url')
+
 
 home_page_url = "https://www.ratesetter.com/"
 provision_fund_url = "https://www.ratesetter.com/Lend/ProvisionFund"
@@ -59,22 +65,31 @@ def convert_to_decimal(num):
     :param num: a number as per formatted by rate setter website
     :return: decimal.Decimal() representation of num
     """
-    val = sub(r'[^\d\(\)\-k.]', '', num.strip('£ \n\r'))
+    val = sub(r'[^\d\(\)\-km.]', '', num.strip('£ \n\r'))
     multiplier = 1
+
     if val[0] == '(' and val[-1] == ')':
         val = "-" + val.rstrip(')').lstrip('(')
+
+    if val[-1] == 'm':
+        multiplier *= 1000000
+        val = val.rstrip('m')
+
     if val[-1] == 'k':
-        multiplier = 1000
+        multiplier *= 1000
         val = val.rstrip('k')
+
     return Decimal(val) * multiplier
 
 
 def multiple_iterator(iterator, nb):
-    while True:
-        res = []
-        for each in range(nb):
-            res.append(next(iterator))
-        yield res
+    #while True:
+    #    res = []
+    #    for each in range(nb):
+    #        res.append(next(iterator))
+    #    yield res
+
+    return zip(*[iterator] * nb)
 
 
 class RateSetterException(Exception):
@@ -384,7 +399,40 @@ class RateSetterClient(object):
         :param market: one of the name held in self.markets
         :return: tuples of
         """
-        pass
+        # load the lending page
+        url = self._lending_url[market]
+        logger.debug("GET request URL: %s", url)
+        page = self._session.get(url)
+        self._sleep_if_needed()
+
+        tree = html.fromstring(page.text, base_url=page.url)
+
+        # Check if there is there is unmatched money
+        span = tree.xpath('.//div[@class="expander"]/h3/span[contains(text(),"Unmatched Money")]')
+
+        # if the span is empty then there is no orders on that market
+        if len(span) == 0:
+            return ()
+
+        lending_menu = tree.xpath('.//div[@id="ctl00_cphContentArea_expUnmatched_pnlLenderUnMatchedOrders"]/table[@class="rsTable"]/tr/td')
+
+        iterator = multiple_iterator(iter(lending_menu), 6)
+        orders = []
+
+        for ldate, lorderid, lamount, lrate, lqueue, lactions in iterator:
+            stringify = etree.XPath("string()")
+
+            ldate = stringify(ldate).strip()
+            ldate = time.strptime(ldate,"%d/%m/%Y")
+            lorderid = lorderid.text.strip()
+            lamount = convert_to_decimal(stringify(lamount).strip())
+            lrate = convert_to_decimal(lrate.text.strip()) / 100
+            lqueue = convert_to_decimal(stringify(lqueue).strip())
+            lanchor = lactions.xpath('./a[contains(text(),"Cancel")]')
+
+            orders.append(MarketOrder(ldate, lorderid, lamount, lrate, lqueue, lanchor.href))
+
+        return tuple(orders)
 
     def cancel_bid(self, bid):
         """Cancel a bid place previously
