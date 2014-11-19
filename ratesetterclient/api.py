@@ -406,6 +406,7 @@ class RateSetterClient(object):
         self._sleep_if_needed()
 
         tree = html.fromstring(page.text, base_url=page.url)
+        tree.make_links_absolute(page.url)
 
         # Check if there is there is unmatched money
         span = tree.xpath('.//div[@class="expander"]/h3/span[contains(text(),"Unmatched Money")]')
@@ -423,24 +424,48 @@ class RateSetterClient(object):
             stringify = etree.XPath("string()")
 
             ldate = stringify(ldate).strip()
-            ldate = time.strptime(ldate,"%d/%m/%Y")
+            ldate = time.strptime(ldate, "%d/%m/%Y")
             lorderid = lorderid.text.strip()
             lamount = convert_to_decimal(stringify(lamount).strip())
             lrate = convert_to_decimal(lrate.text.strip()) / 100
             lqueue = convert_to_decimal(stringify(lqueue).strip())
             lanchor = lactions.xpath('./a[contains(text(),"Cancel")]')
 
-            orders.append(MarketOrder(ldate, lorderid, lamount, lrate, lqueue, lanchor.href))
+            orders.append(MarketOrder(ldate, lorderid, lamount, lrate, lqueue, lanchor[0].attrib['href']))
 
         return tuple(orders)
 
-    def cancel_bid(self, bid):
+    def cancel_bid(self, order):
         """Cancel a bid place previously
 
         :param bid: a bid
         :return:
         """
-        pass
+        logger.debug("Cancelling order %s", order.id)
+        logger.debug("GET request URL: %s", order.cancel_url)
+        page = self._session.get(order.cancel_url)
+        tree = html.fromstring(page.text, base_url=page.url)
+
+        # Check if we have arrived on the confirmation page
+        confirm_tag = tree.xpath('.//form/descendant::h1')
+        if len(confirm_tag) > 0 and confirm_tag[0].text.strip(' \n\r') == "Cancel Order":
+            logger.debug("Request was accepted. Need to confirm")
+            form = tree.forms[0]
+            form.fields["__EVENTTARGET"] = "ctl00$cphContentArea$cphForm$btnConfirm"
+
+            logger.debug("Submit form")
+            page = html.submit_form(form, open_http=self._get_http_helper())
+            self._sleep_if_needed()
+
+            tree = html.fromstring(page.text, base_url=page.url)
+            form = tree.forms[0]
+
+        else:
+            raise RateSetterException('Cannot cancel order')
+
+
+
+
 
     def get_provision_fund(self):
         """Get the status of the provision fund
