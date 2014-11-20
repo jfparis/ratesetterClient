@@ -213,6 +213,9 @@ class RateSetterClient(object):
     def disconnect(self):
         """ Disconnect the client from RateSetter
         """
+        if not self._connected:
+            return
+
         logger.debug("GET request URL: %s", self._sign_out_url)
         page = self._session.get(self._sign_out_url)
 
@@ -320,8 +323,8 @@ class RateSetterClient(object):
 
         return tuple(reversed(market))
 
-    def place_bid(self, market, amount, rate):
-        """ Place a bid to lend money on the market
+    def place_order(self, market, amount, rate):
+        """ Place an order to lend money on the market
 
         :param market: one of the name held in self.markets
         :param amount: Amount to lend in GBP
@@ -349,7 +352,7 @@ class RateSetterClient(object):
 
         # Check if we have arrived on the confirmation page
         confirm_tag = tree.xpath('.//div[@class="singleContainer"]/descendant::h3')
-        if len(confirm_tag) > 0 and confirm_tag[0].text.strip(' \n\r') == "Confirm your request":
+        if len(confirm_tag) > 0 and confirm_tag[0].text.strip(' \n\r') == "Confirm your order":
             logger.debug("Request was accepted. Need to confirm")
         else:
             error_tag = tree.xpath('.//div[@class="contextError"]')
@@ -361,14 +364,15 @@ class RateSetterClient(object):
         form.fields["__EVENTTARGET"] = "ctl00$cphContentArea$btnOrder"
 
         page = html.submit_form(form, open_http=self._get_http_helper())
+        tree = html.fromstring(page.text, base_url=page.url)
 
         # Check if the order has been confirmed
         confirm_tag = tree.xpath('.//div[@class="singleContainer"]/descendant::h3')
         if len(confirm_tag) > 0 and confirm_tag[0].text.strip(' \n\r') == "Your order has been placed":
             logger.debug("Request was confirmed")
         else:
-            logger.debug("Cannot confirm request")
-            raise RateSetterException('Cannot confirm bid')
+            logger.debug("Cannot confirm order")
+            raise RateSetterException('Cannot confirm order')
 
 
     def get_market_rates(self):
@@ -393,11 +397,11 @@ class RateSetterClient(object):
 
         return Markets(*rates)
 
-    def list_bids(self, market):
-        """List bids in a given market
+    def list_orders(self, market):
+        """List orders in a given market
 
         :param market: one of the name held in self.markets
-        :return: tuples of
+        :return: tuple of MarketOrder tuples
         """
         # load the lending page
         url = self._lending_url[market]
@@ -431,14 +435,14 @@ class RateSetterClient(object):
             lqueue = convert_to_decimal(stringify(lqueue).strip())
             lanchor = lactions.xpath('./a[contains(text(),"Cancel")]')
 
-            orders.append(MarketOrder(ldate, lorderid, lamount, lrate, lqueue, lanchor[0].attrib['href']))
+            orders.append(MarketOrder(date=ldate, id=lorderid, amount=lamount, rate=lrate, queue=lqueue, cancel_url=lanchor[0].attrib['href']))
 
         return tuple(orders)
 
-    def cancel_bid(self, order):
-        """Cancel a bid place previously
+    def cancel_order(self, order):
+        """Cancel an order placed previously
 
-        :param bid: a bid
+        :param order: a MarketOrder tuple
         :return:
         """
         logger.debug("Cancelling order %s", order.id)
@@ -462,9 +466,6 @@ class RateSetterClient(object):
 
         else:
             raise RateSetterException('Cannot cancel order')
-
-
-
 
 
     def get_provision_fund(self):
