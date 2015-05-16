@@ -100,19 +100,19 @@ class TestClient(unittest.TestCase):
         self.assertGreater(len(market), 0, "Market is empty")
 
     def testFailedLending(self):
-        self.assertRaises(ratesetterclient.api.RateSetterException, self.client.place_bid, self.client.markets.monthly, 5, 0.10)
+        self.assertRaises(ratesetterclient.api.RateSetterException, self.client.place_order, self.client.markets.monthly, 5, 0.10)
 
     def testLending(self):
-        old_orders = self.client.list_bids(self.client.markets.monthly)
-        self.client.place_bid(self.client.markets.monthly, 10, 0.20)
-        new_orders = self.client.list_bids(self.client.markets.monthly)
+        old_orders = self.client.list_orders(self.client.markets.monthly)
+        self.client.place_order(self.client.markets.monthly, 10, 0.10)
+        new_orders = self.client.list_orders(self.client.markets.monthly)
         self.assertEqual(len(old_orders)+1, len(new_orders))
         cancel = None
         for order in new_orders:
-            if order.amount == Decimal('10.00') and order.rate == Decimal('0.20'):
+            if order.amount == Decimal('10.00') and order.rate == Decimal('0.10'):
                 cancel = order
         self.assertIsNotNone(cancel, "Could not identify order in the list")
-        self.client.cancel_bid(order)
+        self.client.cancel_order(order)
 
 
 def suite():

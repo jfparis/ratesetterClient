@@ -29,7 +29,7 @@ from .log import logger
 __all__ = ['Markets', 'Account', 'RateSetterException', 'RateSetterClient']
 
 
-markets_list = (("monthly", "Monthly Access"),
+markets_list = (("monthly", "Monthly"),
                 ("bond_1year", "1 Year"),
                 ("income_3year", "3 Year Income"),
                 ("income_5year", "5 Year Income"))
@@ -42,7 +42,7 @@ account_keys = (("deposited", "Deposited"),
                 ("on_market", "Money On Market"),
                 ("fees", "Fees paid to RateSetter"),
                 ("withdrawals", "Withdrawals"),
-                ("total", "TOTAL"))
+                ("total", "Total"))
 
 Markets = namedtuple('Markets', ','.join([key for key, _ in markets_list]))
 Account = namedtuple('Account', ",".join([key for key, _ in account_keys]))
@@ -277,12 +277,12 @@ class RateSetterClient(object):
         for key, label in markets_list:
             td = tree.xpath('.//h3/span[contains(text(),"Your Portfolio")]/following::td[contains(text(),"{}")]/parent::tr/descendant::td[contains(@style,"align")]'.format(label))
 
-            amount = convert_to_decimal(td[0].text + td[1].text)
-            if not "-" in td[2].text:
-                average_rate = convert_to_decimal(td[2].text.rstrip("%"))/100
+            amount = convert_to_decimal(td[1].text + td[2].text)
+            if not "-" in td[3].text:
+                average_rate = convert_to_decimal(td[3].text.rstrip("%"))/100
             else:
                 average_rate = Decimal(0)
-            on_market = convert_to_decimal(td[3].text + td[4].text)
+            on_market = convert_to_decimal(td[4].text + td[5].text)
             portfolio_items.append(PortfolioRow(amount=amount, average_rate=average_rate, on_market=on_market))
 
         return Markets(*portfolio_items)
@@ -373,7 +373,6 @@ class RateSetterClient(object):
         else:
             logger.debug("Cannot confirm order")
             raise RateSetterException('Cannot confirm order')
-
 
     def get_market_rates(self):
         """Get the rates of the latest matches on the different markets
