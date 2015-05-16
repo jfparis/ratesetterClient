@@ -309,7 +309,7 @@ class RateSetterClient(object):
         tree = html.fromstring(page.text, base_url=page.url)
         lending_menu = tree.xpath('.//form/div[@class="rsTableContainer"]/table[@class="rsTable"]/tr/td')
 
-        iterator = multiple_iterator(iter(lending_menu), 4)
+        iterator = iter(multiple_iterator(iter(lending_menu), 4))
         _ = next(iterator)
         market = []
 
