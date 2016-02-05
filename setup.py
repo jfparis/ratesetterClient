@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-#  Copyright 2014 Jean-Francois Paris
+#  Copyright 2014-2016 Jean-Francois Paris
 #
 # This library is free software: you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -35,6 +35,7 @@ setup(
     install_requires=[
         'lxml',
         'requests',
+        'pandas',
     ],
     classifiers=(
         'Development Status :: 5 - Production/Stable',

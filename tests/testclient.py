@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-#  Copyright 2014 Jean-Francois Paris
+#  Copyright 2014-2016 Jean-Francois Paris
 #
 # This library is free software: you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -61,43 +61,43 @@ class TestClient(unittest.TestCase):
 
     def testMarketRates(self):
         rates = self.client.get_market_rates()
-        self.assertGreater(rates.monthly, 0, "Rate cannot be 0")
-        self.assertGreater(rates.bond_1year, 0, "Rate cannot be 0")
-        self.assertGreater(rates.income_3year, 0, "Rate cannot be 0")
-        self.assertGreater(rates.income_5year, 0, "Rate cannot be 0")
+        self.assertGreater(rates.loc['monthly'].rate, 0, "Rate cannot be 0")
+        self.assertGreater(rates.loc['bond_1year'].rate, 0, "Rate cannot be 0")
+        self.assertGreater(rates.loc['income_3year'].rate, 0, "Rate cannot be 0")
+        self.assertGreater(rates.loc['income_5year'].rate, 0, "Rate cannot be 0")
 
     def testProvision(self):
         provision = self.client.get_provision_fund()
-        self.assertGreater(provision.amount, 0, "Provision amount cannot be 0")
-        self.assertGreater(provision.coverage, 0, 'Provision coverage cannot be < 0')
+        self.assertGreater(provision.amount[0], 0, "Provision amount cannot be 0")
+        self.assertGreater(provision.coverage[0], 0, 'Provision coverage cannot be < 0')
 
     def testAccount(self):
         account = self.client.get_account_summary()
-        self.assertGreater(account.deposited, 0, "Deposited cannot be 0")
-        self.assertGreater(account.interest_earned, 0, "interest_earned cannot be 0")
-        self.assertGreater(account.total, 0, "total cannot be 0")
+        self.assertGreater(account['deposited'][0], 0, "Deposited cannot be 0")
+        self.assertGreater(account['interest_earned'][0], 0, "interest_earned cannot be 0")
+        self.assertGreater(account['total'][0], 0, "total cannot be 0")
 
     def testPortfolio(self):
         portfolio = self.client.get_portfolio_summary()
-        bond = portfolio.bond_1year
+        bond = portfolio.loc['bond_1year']
         self.assertGreater(bond.amount, 0, "Bond is lent")
         self.assertGreater(bond.average_rate, 0, "Bond is lent")
-        income_3year = portfolio.income_3year
+        income_3year = portfolio.loc['income_3year']
         self.assertGreater(income_3year.amount, 0, "3 year is lent")
         self.assertGreater(income_3year.average_rate, 0, "3 year is lent")
-        income_5year = portfolio.income_5year
+        income_5year = portfolio.loc['income_5year']
         self.assertGreater(income_5year.amount, 0, "5 year is lent")
         self.assertGreater(income_5year.average_rate, 0, "5 year is lent")
 
     def testMarkets(self):
         market = self.client.get_market(self.client.markets.monthly)
-        self.assertGreater(len(market), 0, "Market is empty")
+        self.assertGreater(market.count().rate, 0, "Market is empty")
         market = self.client.get_market(self.client.markets.bond_1year)
-        self.assertGreater(len(market), 0, "Market is empty")
+        self.assertGreater(market.count().rate, 0, "Market is empty")
         market = self.client.get_market(self.client.markets.income_3year)
-        self.assertGreater(len(market), 0, "Market is empty")
+        self.assertGreater(market.count().rate, 0, "Market is empty")
         market = self.client.get_market(self.client.markets.income_5year)
-        self.assertGreater(len(market), 0, "Market is empty")
+        self.assertGreater(market.count().rate, 0, "Market is empty")
 
     def testFailedLending(self):
         self.assertRaises(ratesetterclient.api.RateSetterException, self.client.place_order, self.client.markets.monthly, 5, 0.10)
@@ -107,12 +107,11 @@ class TestClient(unittest.TestCase):
         self.client.place_order(self.client.markets.monthly, 10, 0.10)
         new_orders = self.client.list_orders(self.client.markets.monthly)
         self.assertEqual(len(old_orders)+1, len(new_orders))
-        cancel = None
-        for order in new_orders:
-            if order.amount == Decimal('10.00') and order.rate == Decimal('0.10'):
-                cancel = order
-        self.assertIsNotNone(cancel, "Could not identify order in the list")
-        self.client.cancel_order(order)
+
+        order = new_orders[new_orders.amount == Decimal('10.00')][new_orders.rate == Decimal('0.10')]
+
+        self.assertEqual(len(order), 1, "Could not identify order in the list")
+        self.client.cancel_order(order.iloc[0])
 
 
 def suite():

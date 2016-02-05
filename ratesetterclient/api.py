@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-#  Copyright 2014 Jean-Francois Paris
+#  Copyright 2014-2016 Jean-Francois Paris
 #
 # This library is free software: you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -24,9 +24,10 @@ from re import sub
 import time
 from collections import namedtuple
 from .log import logger
+import pandas as pd
 
 
-__all__ = ['Markets', 'Account', 'RateSetterException', 'RateSetterClient']
+__all__ = ['RateSetterClient']
 
 
 markets_list = (("monthly", "Monthly"),
@@ -44,13 +45,8 @@ account_keys = (("deposited", "Deposited"),
                 ("withdrawals", "Withdrawals"),
                 ("total", "Total"))
 
-Markets = namedtuple('Markets', ','.join([key for key, _ in markets_list]))
-Account = namedtuple('Account', ",".join([key for key, _ in account_keys]))
-MarketOffer = namedtuple('MarketOffer', 'rate, amount, nb_offers, cum_amount')
-PortfolioRow = namedtuple('PortfolioRow', 'amount, average_rate, on_market')
-ProvisionFund = namedtuple('ProvisionFund', 'amount, coverage')
-MarketOrder = namedtuple('MarketOrder', 'date, id, amount, rate, queue, cancel_url')
 
+Markets = namedtuple('Markets', ','.join([key for key, _ in markets_list]))
 
 home_page_url = "https://www.ratesetter.com/"
 provision_fund_url = "https://www.ratesetter.com/Lend/ProvisionFund"
@@ -83,11 +79,6 @@ def convert_to_decimal(num):
 
 
 def multiple_iterator(iterator, nb):
-    #while True:
-    #    res = []
-    #    for each in range(nb):
-    #        res.append(next(iterator))
-    #    yield res
 
     return zip(*[iterator] * nb)
 
@@ -155,7 +146,7 @@ class RateSetterClient(object):
         This method is used to make our behaviour look more human and avoid overloading Zopa's server
         """
         if self._natural:
-            #if in natural mode we sleep for some time
+            # if in natural mode we sleep for some time
             time.sleep(random.randint(2, 10))
 
     def _extract_url(self, tree):
@@ -174,7 +165,7 @@ class RateSetterClient(object):
         self._lending_url = {}
         lending_menu = tree.xpath('.//a[contains(text(),"Lend Money")]/parent::li//following::li[position()<5]/a')
         for each in lending_menu:
-            self._lending_url[inv_markets[each.text]] = each.get("href")
+            self._lending_url[inv_markets[each.text]] = each.get("href").replace("market_view_new", "market_view")
 
     def connect(self):
         """Connect the client to RateSetter
@@ -201,7 +192,7 @@ class RateSetterClient(object):
 
         if "login.aspx" in page.url:
             raise RateSetterException("Failed to connect")
-        if not "your_lending/summary" in page.url:
+        if "your_lending/summary" not in page.url:
             raise RateSetterException("Site has changed")
 
         self._dashboard_url = page.url
@@ -219,7 +210,7 @@ class RateSetterClient(object):
         logger.debug("GET request URL: %s", self._sign_out_url)
         page = self._session.get(self._sign_out_url)
 
-        if not "login.aspx" in page.url:
+        if "login.aspx" not in page.url:
             raise RateSetterException("Failed to sign out")
 
         self._connected = False
@@ -227,7 +218,7 @@ class RateSetterClient(object):
     def get_account_summary(self):
         """Get a summary of the account
 
-        :return: a namedtuple containing the following field
+        :return: a dataframe containing one record with the following series
 
         * deposited: total amount deposited since the opening of the account
         * balance: Balance (Available to lend)
@@ -245,24 +236,26 @@ class RateSetterClient(object):
         self._sleep_if_needed()
         tree = html.fromstring(page.text, base_url=page.url)
 
-        response = []
+        response = {}
+        labels = []
         for key, label in account_keys:
+            labels.append(key)
             td = tree.xpath('.//h3/span[contains(text(),"Your Balance Sheet")]/following::td[contains(text(),"{}")]/following-sibling::td[contains(text(),"£")]'.format(label))
-            response.append(convert_to_decimal(td[0].text))
+            response[key] = convert_to_decimal(td[0].text)
 
-        return Account(*response)
+        return pd.DataFrame(response, index=[0])
 
     def get_portfolio_summary(self):
         """Get a summary of the connected user portfolio
 
-        :return: a named tuple with the four fields
+        :return: a dataframe with four record
 
         * monthly: user portfolio on the Monthly Access market
         * bond_1year: user portfolio on the 1 Year Bond market
         * income_3year: user portfolio on the 3 Year Income market
         * income_5year: user portfolio on the 5 Year Income market
 
-        A user portfolio is in turn a named tuple with the following fields
+        Each record has the following series
         * amount: Money on loan in that particular market
         * average_rate: Average lending rate
         * on_market: Money currently on offer on the market
@@ -278,21 +271,22 @@ class RateSetterClient(object):
             td = tree.xpath('.//h3/span[contains(text(),"Your Portfolio")]/following::td[contains(text(),"{}")]/parent::tr/descendant::td[contains(@style,"align")]'.format(label))
 
             amount = convert_to_decimal(td[1].text + td[2].text)
-            if not "-" in td[3].text:
+            if "-" not in td[3].text:
                 average_rate = convert_to_decimal(td[3].text.rstrip("%"))/100
             else:
                 average_rate = Decimal(0)
             on_market = convert_to_decimal(td[4].text + td[5].text)
-            portfolio_items.append(PortfolioRow(amount=amount, average_rate=average_rate, on_market=on_market))
+            portfolio_items.append({'amount': amount, 'average_rate': average_rate, 'on_market': on_market})
 
-        return Markets(*portfolio_items)
+        # build result as dataframe
+        dfindex = [market for market, _ in markets_list]
+        return pd.DataFrame(portfolio_items, index=dfindex)
 
     def get_market(self, market):
         """Get the money on offer on a given market
 
         :param market: one of the name held in self.markets
-        :return: a tuple, ordered from the lowest rate to the highest, containing containing \
-        named tuples with the following fields
+        :return: a dataframe with the following series
 
         * rate: the offered rate
         * amount: the total amount on offer at that rate
@@ -319,9 +313,9 @@ class RateSetterClient(object):
             nb_offers = convert_to_decimal(nb_offer.text.strip())
             cum_amount = convert_to_decimal(cum_amount.text.strip())
 
-            market.append(MarketOffer(rate=rate, amount=amount, nb_offers=nb_offers, cum_amount=cum_amount))
+            market.append({'rate': rate, 'amount': amount, 'nb_offers': nb_offers, 'cum_amount': cum_amount})
 
-        return tuple(reversed(market))
+        return pd.DataFrame(market)
 
     def place_order(self, market, amount, rate):
         """ Place an order to lend money on the market
@@ -377,12 +371,12 @@ class RateSetterClient(object):
     def get_market_rates(self):
         """Get the rates of the latest matches on the different markets
 
-        :return: a named tuple with the four fields
+        :return: a dataframe with four record and a rate for each
 
-        * monthly: latest match on the Monthly Access market
-        * bond_1year: latest match on the 1 Year Bond market
-        * income_3year: latest match on the 3 Year Income market
-        * income_5year: latest match on the 5 Year Income market
+        * monthly: user portfolio on the Monthly Access market
+        * bond_1year: user portfolio on the 1 Year Bond market
+        * income_3year: user portfolio on the 3 Year Income market
+        * income_5year: user portfolio on the 5 Year Income market
         """
         rates = []
         logger.debug("GET request URL: %s", self._dashboard_url)
@@ -394,7 +388,9 @@ class RateSetterClient(object):
             span = tree.xpath('.//td[contains(text(),"{}")]/parent::tr/following-sibling::tr/td/h3/a'.format(html_label))
             rates.append(convert_to_decimal(span[0].text)/100)
 
-        return Markets(*rates)
+        # build result as dataframe
+        dfindex = [market for market, _ in markets_list]
+        return pd.DataFrame(rates, index=dfindex, columns=['rate'])
 
     def list_orders(self, market):
         """List orders in a given market
@@ -434,9 +430,10 @@ class RateSetterClient(object):
             lqueue = convert_to_decimal(stringify(lqueue).strip())
             lanchor = lactions.xpath('./a[contains(text(),"Cancel")]')
 
-            orders.append(MarketOrder(date=ldate, id=lorderid, amount=lamount, rate=lrate, queue=lqueue, cancel_url=lanchor[0].attrib['href']))
+            orders.append({"date": ldate, "id": lorderid, "amount": lamount, "rate": lrate, "queue": lqueue,
+                           "cancel_url": lanchor[0].attrib['href']})
 
-        return tuple(orders)
+        return pd.DataFrame(orders)
 
     def cancel_order(self, order):
         """Cancel an order placed previously
@@ -466,11 +463,10 @@ class RateSetterClient(object):
         else:
             raise RateSetterException('Cannot cancel order')
 
-
     def get_provision_fund(self):
         """Get the status of the provision fund
 
-        :return: A named tuple with two fields:
+        :return: A pandas dataframe with two series:
 
         * amount: the amount in the fund in GBP
         * coverage: the coverage ratio of the fund
@@ -479,10 +475,12 @@ class RateSetterClient(object):
         page = self._session.get(provision_fund_url)
         tree = html.fromstring(page.text, base_url=page.url)
 
+        response = {}
+
         span = tree.xpath('.//h2[@class="hero-provision-amount"]')
-        amount = convert_to_decimal(span[0].text)
+        response['amount'] = convert_to_decimal(span[0].text)
 
         span = tree.xpath('.//span[@class="hero-provision-value"]')
-        coverage = convert_to_decimal(span[0].text)/100
+        response['coverage'] = convert_to_decimal(span[0].text)/100
 
-        return ProvisionFund(amount=amount, coverage=coverage)
+        return pd.DataFrame(response, index=[0])
