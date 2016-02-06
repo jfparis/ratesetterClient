@@ -301,11 +301,13 @@ class RateSetterClient(object):
         self._sleep_if_needed()
 
         tree = html.fromstring(page.text, base_url=page.url)
+
+        # extract the lending offers
         lending_menu = tree.xpath('.//form/div[@class="rsTableContainer"]/table[@class="rsTable"]/tr/td')
 
         iterator = iter(multiple_iterator(iter(lending_menu), 4))
         _ = next(iterator)
-        market = []
+        market = {}
 
         for rate, amount, nb_offer, cum_amount in iterator:
             rate = convert_to_decimal(rate.text.strip()) / 100
@@ -313,9 +315,34 @@ class RateSetterClient(object):
             nb_offers = convert_to_decimal(nb_offer.text.strip())
             cum_amount = convert_to_decimal(cum_amount.text.strip())
 
-            market.append({'rate': rate, 'amount': amount, 'nb_offers': nb_offers, 'cum_amount': cum_amount})
+            market[rate] = {'rate': rate, 'lend_amount': amount, 'lend_offers': nb_offers, 'lend_cum_amount': cum_amount,
+                            'borrow_amount': 0, 'borrow_offers': 0, 'borrow_cum_amount': 0}
 
-        return pd.DataFrame(market)
+        # extract the borrowing offers
+        borrowing_menu = tree.xpath('.//form/div[@id="pnlBorrow"]/div[@class="rsTableContainer"]/table[@class="rsTable"]/tr/td')
+
+        if len(borrowing_menu) > 0:
+            iterator = iter(multiple_iterator(iter(borrowing_menu), 4))
+            _ = next(iterator)
+
+            for rate, amount, nb_offer, cum_amount in iterator:
+                rate = convert_to_decimal(rate.text.strip()) / 100
+                amount = convert_to_decimal(amount.text.strip())
+                nb_offers = convert_to_decimal(nb_offer.text.strip())
+                cum_amount = convert_to_decimal(cum_amount.text.strip())
+
+                if rate in market.keys():
+                    item = market[rate]
+                    item['borrow_amount'] = amount
+                    item['borrow_offers'] = nb_offers
+                    item['borrow_cum_amount'] = cum_amount
+                else:
+                    market[rate] = {'rate': rate, 'lend_amount': 0, 'lend_offers': 0, 'lend_cum_amount': 0,
+                                    'borrow_amount': amount, 'borrow_offers': nb_offers, 'borrow_cum_amount': cum_amount}
+
+        df = pd.DataFrame.from_dict(market, orient='index')
+        return df[['rate', 'lend_amount', 'lend_offers', 'lend_cum_amount', 'borrow_amount', 'borrow_offers',
+                   'borrow_cum_amount']]
 
     def place_order(self, market, amount, rate):
         """ Place an order to lend money on the market
