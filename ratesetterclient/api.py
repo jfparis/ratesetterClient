@@ -75,7 +75,7 @@ def convert_to_decimal(num):
         multiplier *= 1000
         val = val.rstrip('k')
 
-    return Decimal(val) * multiplier
+    return float(val) * multiplier
 
 
 def multiple_iterator(iterator, nb):
@@ -274,7 +274,7 @@ class RateSetterClient(object):
             if "-" not in td[3].text:
                 average_rate = convert_to_decimal(td[3].text.rstrip("%"))/100
             else:
-                average_rate = Decimal(0)
+                average_rate = 0.0
             on_market = convert_to_decimal(td[4].text + td[5].text)
             portfolio_items.append({'amount': amount, 'average_rate': average_rate, 'on_market': on_market})
 

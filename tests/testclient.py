@@ -108,7 +108,7 @@ class TestClient(unittest.TestCase):
         new_orders = self.client.list_orders(self.client.markets.monthly)
         self.assertEqual(len(old_orders)+1, len(new_orders))
 
-        order = new_orders[new_orders.amount == Decimal('10.00')][new_orders.rate == Decimal('0.10')]
+        order = new_orders[new_orders.amount == 10.0][new_orders.rate == 0.10]
 
         self.assertEqual(len(order), 1, "Could not identify order in the list")
         self.client.cancel_order(order.iloc[0])
