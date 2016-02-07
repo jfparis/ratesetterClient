@@ -19,7 +19,6 @@ from __future__ import unicode_literals, absolute_import, print_function, divisi
 import random
 import requests
 from lxml import html, etree
-from decimal import Decimal
 from re import sub
 import time
 from collections import namedtuple
@@ -54,12 +53,12 @@ market_view_url = "https://members.ratesetter.com/your_lending/lend_money/choose
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:29.0) Gecko/20100101 Firefox/29.0"
 
 
-def convert_to_decimal(num):
-    """ convert strings to decimal.Decimal() objects, taking into account ratesetter formatting
+def convert_to_float(num):
+    """ convert strings to float, taking into account ratesetter formatting
     conventions
 
     :param num: a number as per formatted by rate setter website
-    :return: decimal.Decimal() representation of num
+    :return: float representation of num
     """
     val = sub(r'[^\d\(\)\-km.]', '', num.strip('£ \n\r'))
     multiplier = 1
@@ -97,7 +96,7 @@ class RateSetterClient(object):
 
         :param str email: email address for the account
         :param str password: password for the account
-        :param boolean natural: when true, the object behave naturally and pauses between requests
+        :param boolean natural: when True, the client tro to emulate a human behavior and pauses between requests
         """
 
         self._email = email
@@ -241,7 +240,7 @@ class RateSetterClient(object):
         for key, label in account_keys:
             labels.append(key)
             td = tree.xpath('.//h3/span[contains(text(),"Your Balance Sheet")]/following::td[contains(text(),"{}")]/following-sibling::td[contains(text(),"£")]'.format(label))
-            response[key] = convert_to_decimal(td[0].text)
+            response[key] = convert_to_float(td[0].text)
 
         return pd.DataFrame(response, index=[0])
 
@@ -270,12 +269,12 @@ class RateSetterClient(object):
         for key, label in markets_list:
             td = tree.xpath('.//h3/span[contains(text(),"Your Portfolio")]/following::td[contains(text(),"{}")]/parent::tr/descendant::td[contains(@style,"align")]'.format(label))
 
-            amount = convert_to_decimal(td[1].text + td[2].text)
+            amount = convert_to_float(td[1].text + td[2].text)
             if "-" not in td[3].text:
-                average_rate = convert_to_decimal(td[3].text.rstrip("%"))/100
+                average_rate = convert_to_float(td[3].text.rstrip("%")) / 100
             else:
                 average_rate = 0.0
-            on_market = convert_to_decimal(td[4].text + td[5].text)
+            on_market = convert_to_float(td[4].text + td[5].text)
             portfolio_items.append({'amount': amount, 'average_rate': average_rate, 'on_market': on_market})
 
         # build result as dataframe
@@ -289,9 +288,12 @@ class RateSetterClient(object):
         :return: a dataframe with the following series
 
         * rate: the offered rate
-        * amount: the total amount on offer at that rate
-        * nb_offers: the number of offers
-        * cum_amount: cumulative amount on offer at that rate and below
+        * lend_amount: the total amount on offer at that rate
+        * lend_offers: the number of offers
+        * lend_cum_amount: cumulative amount on offer at that rate and below
+        * borrow_amount: the total amount on request at that rate
+        * borrow_offers: the number of request
+        * borrow_cum_amount: cumulative amount on request at that rate and below
         """
         url = self._lending_url[market]
         url = url.replace("market_view", "market_full").replace("?pid=", "?ID=")
@@ -310,10 +312,10 @@ class RateSetterClient(object):
         market = {}
 
         for rate, amount, nb_offer, cum_amount in iterator:
-            rate = convert_to_decimal(rate.text.strip()) / 100
-            amount = convert_to_decimal(amount.text.strip())
-            nb_offers = convert_to_decimal(nb_offer.text.strip())
-            cum_amount = convert_to_decimal(cum_amount.text.strip())
+            rate = convert_to_float(rate.text.strip()) / 100
+            amount = convert_to_float(amount.text.strip())
+            nb_offers = convert_to_float(nb_offer.text.strip())
+            cum_amount = convert_to_float(cum_amount.text.strip())
 
             market[rate] = {'rate': rate, 'lend_amount': amount, 'lend_offers': nb_offers, 'lend_cum_amount': cum_amount,
                             'borrow_amount': 0, 'borrow_offers': 0, 'borrow_cum_amount': 0}
@@ -326,10 +328,10 @@ class RateSetterClient(object):
             _ = next(iterator)
 
             for rate, amount, nb_offer, cum_amount in iterator:
-                rate = convert_to_decimal(rate.text.strip()) / 100
-                amount = convert_to_decimal(amount.text.strip())
-                nb_offers = convert_to_decimal(nb_offer.text.strip())
-                cum_amount = convert_to_decimal(cum_amount.text.strip())
+                rate = convert_to_float(rate.text.strip()) / 100
+                amount = convert_to_float(amount.text.strip())
+                nb_offers = convert_to_float(nb_offer.text.strip())
+                cum_amount = convert_to_float(cum_amount.text.strip())
 
                 if rate in market.keys():
                     item = market[rate]
@@ -413,7 +415,7 @@ class RateSetterClient(object):
         for key, html_label in markets_list:
 
             span = tree.xpath('.//td[contains(text(),"{}")]/parent::tr/following-sibling::tr/td/h3/a'.format(html_label))
-            rates.append(convert_to_decimal(span[0].text)/100)
+            rates.append(convert_to_float(span[0].text) / 100)
 
         # build result as dataframe
         dfindex = [market for market, _ in markets_list]
@@ -423,7 +425,14 @@ class RateSetterClient(object):
         """List orders in a given market
 
         :param market: one of the name held in self.markets
-        :return: tuple of MarketOrder tuples
+        :return: a dataframe with the following series
+
+        * date: date the offer was place
+        * id: the offer id
+        * amount: the amount on offer
+        * rate: the rate
+        * queue: the amount on offer that stands below in the pecking order
+        * cancel_url: the url to cancel the offer
         """
         # load the lending page
         url = self._lending_url[market]
@@ -452,9 +461,9 @@ class RateSetterClient(object):
             ldate = stringify(ldate).strip()
             ldate = time.strptime(ldate, "%d/%m/%Y")
             lorderid = lorderid.text.strip()
-            lamount = convert_to_decimal(stringify(lamount).strip())
-            lrate = convert_to_decimal(lrate.text.strip()) / 100
-            lqueue = convert_to_decimal(stringify(lqueue).strip())
+            lamount = convert_to_float(stringify(lamount).strip())
+            lrate = convert_to_float(lrate.text.strip()) / 100
+            lqueue = convert_to_float(stringify(lqueue).strip())
             lanchor = lactions.xpath('./a[contains(text(),"Cancel")]')
 
             orders.append({"date": ldate, "id": lorderid, "amount": lamount, "rate": lrate, "queue": lqueue,
@@ -465,7 +474,7 @@ class RateSetterClient(object):
     def cancel_order(self, order):
         """Cancel an order placed previously
 
-        :param order: a MarketOrder tuple
+        :param order: a DataFrame with one record. Must contain a cancel_url series
         :return:
         """
         logger.debug("Cancelling order %s", order.id)
@@ -505,9 +514,9 @@ class RateSetterClient(object):
         response = {}
 
         span = tree.xpath('.//h2[@class="hero-provision-amount"]')
-        response['amount'] = convert_to_decimal(span[0].text)
+        response['amount'] = convert_to_float(span[0].text)
 
         span = tree.xpath('.//span[@class="hero-provision-value"]')
-        response['coverage'] = convert_to_decimal(span[0].text)/100
+        response['coverage'] = convert_to_float(span[0].text) / 100
 
         return pd.DataFrame(response, index=[0])
