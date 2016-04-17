@@ -29,7 +29,7 @@ import pandas as pd
 __all__ = ['RateSetterClient']
 
 
-markets_list = (("monthly", "Monthly"),
+markets_list = (("monthly", "Rolling"),
                 ("bond_1year", "1 Year"),
                 ("income_3year", "3 Year Income"),
                 ("income_5year", "5 Year Income"))
@@ -513,10 +513,10 @@ class RateSetterClient(object):
 
         response = {}
 
-        span = tree.xpath('.//h2[@class="hero-provision-amount"]')
+        span = tree.xpath('.//span[@class="pf-balance"]')
         response['amount'] = convert_to_float(span[0].text)
 
-        span = tree.xpath('.//span[@class="hero-provision-value"]')
+        span = tree.xpath('.//div[@class="col-xs-12 coverage-box"]/descendant::span[@class="value"]')  #
         response['coverage'] = convert_to_float(span[0].text) / 100
 
         return pd.DataFrame(response, index=[0])
